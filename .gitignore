@@ -1,0 +1,24 @@
+.env
+.env.local
+*.key
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+data/*.sqlite
+data/*.sqlite-journal
+logs/*.log
+out/*.html
+out/*.png
+.DS_Store
+.idea/
+.vscode/
+
+# Private research artefacts — not for public repo
+backtest_*.py
+intraweek_*.py
+intraweek_*.png
+vrp_backtest*.png
+vrp_cache/
+options_research/

@@ -1,0 +1,10 @@
+[Unit]
+Description=vrp-agent dashboard refresh (every 5 min)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Unit=vrp-dashboard.service
+
+[Install]
+WantedBy=timers.target

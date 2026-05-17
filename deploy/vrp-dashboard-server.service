@@ -1,0 +1,16 @@
+[Unit]
+Description=vrp-agent dashboard HTTP server (port 8082)
+After=network-online.target
+
+[Service]
+Type=simple
+# Edit User/Group to match vrp-agent.service.
+User=vrpagent
+Group=vrpagent
+WorkingDirectory=/opt/vrp-agent/out
+ExecStart=/usr/bin/python3 -m http.server 8082 --bind 0.0.0.0
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

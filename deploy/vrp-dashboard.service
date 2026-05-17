@@ -1,0 +1,13 @@
+[Unit]
+Description=vrp-agent dashboard renderer (one-shot)
+
+[Service]
+Type=oneshot
+# Edit User/Group to match vrp-agent.service.
+User=vrpagent
+Group=vrpagent
+WorkingDirectory=/opt/vrp-agent
+Environment="PATH=/opt/vrp-agent/.venv/bin:/usr/bin:/bin"
+ExecStart=/opt/vrp-agent/.venv/bin/python -m src.dashboard
+StandardOutput=append:/opt/vrp-agent/logs/dashboard.log
+StandardError=append:/opt/vrp-agent/logs/dashboard.log

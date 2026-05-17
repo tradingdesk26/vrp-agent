@@ -1,0 +1,31 @@
+[Unit]
+Description=vrp-agent — VRP-driven autonomous trading agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Edit User/Group to the OS user that owns /opt/vrp-agent (or your install path).
+Type=simple
+User=vrpagent
+Group=vrpagent
+WorkingDirectory=/opt/vrp-agent
+Environment="PATH=/opt/vrp-agent/.venv/bin:/usr/bin:/bin"
+ExecStart=/opt/vrp-agent/.venv/bin/python -m src.main
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/opt/vrp-agent/logs/systemd.log
+StandardError=append:/opt/vrp-agent/logs/systemd.log
+
+# Resource limits
+MemoryMax=1G
+TasksMax=128
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/opt/vrp-agent/data /opt/vrp-agent/logs
+
+[Install]
+WantedBy=multi-user.target
