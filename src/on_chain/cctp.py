@@ -157,6 +157,9 @@ class CCTPBridge:
                               max_wait_sec: int = 120,
                               poll_interval_sec: int = 3) -> dict | None:
         """Poll Iris API until attestation is `complete`."""
+        # web3.py v6 .hex() returns without "0x" prefix; Iris API requires it.
+        if not burn_tx.startswith("0x"):
+            burn_tx = "0x" + burn_tx
         url = f"{IRIS_API}/{src_domain}?transactionHash={burn_tx}"
         start = time.time()
         while time.time() - start < max_wait_sec:
