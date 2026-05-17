@@ -78,7 +78,7 @@ def render_chart(df, trades_df, out_path):
         if t["entry_ts"]:
             try:
                 ts = pd.Timestamp(t["entry_ts"])
-                if df["datetime"].min() <= ts <= df["datetime"].max():
+                if df["datetime"].min() <= ts:
                     ax.scatter(ts, t["entry_price"], marker="^", s=80,
                                 color="green", zorder=5, edgecolors="black", linewidth=0.5)
             except Exception:
@@ -86,7 +86,7 @@ def render_chart(df, trades_df, out_path):
         if t["exit_ts"]:
             try:
                 ts = pd.Timestamp(t["exit_ts"])
-                if df["datetime"].min() <= ts <= df["datetime"].max():
+                if df["datetime"].min() <= ts:
                     ax.scatter(ts, t["exit_price"], marker="v", s=80,
                                 color="red", zorder=5, edgecolors="black", linewidth=0.5)
             except Exception:
