@@ -162,7 +162,10 @@ def run_reverse():
     log.info(f"\n--- Step 2: spot_send USDC HC → HyperEVM ---")
     post_close_spot = hl_spot_usdc(base.address)
     log.info(f"  HL spot USDC after close: ${post_close_spot:.4f}")
-    amount_to_send = post_close_spot - 0.10  # leave $0.10 buffer
+    # Round to 2 decimals (cents). HL `send_asset` rejects amounts whose
+    # float representation has a long fractional tail with
+    # "Invalid number of decimals". USDC supports 8 decimals so 2 is safe.
+    amount_to_send = round(post_close_spot - 0.10, 2)
 
     if amount_to_send < 1.0:
         log.error(f"  insufficient HL spot USDC (${amount_to_send:.4f} < $1) — aborting")
