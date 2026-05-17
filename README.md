@@ -159,7 +159,7 @@ renderer every 5 minutes and the HTTP server continuously.
    │      │                ▼                              │
    │  PARKED_IN_LP ◀───────┘                              │
    │      ▲                                               │
-   │      │ regime recovers                              │
+   │      │ regime recovers                               │
    │      │                                               │
    │  DEFENSIVE_CASH ◀── regime crash trigger             │
    └──────────────────────────────────────────────────────┘
