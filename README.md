@@ -14,6 +14,10 @@ never sees other people's funds. Code is MIT-licensed.
 Strategy backtest, deployment addresses, research charts:
 [github.com/tradingdesk26/regimeshift-fx](https://github.com/tradingdesk26/regimeshift-fx).
 
+**Watch the reference agent live:** [https://regimeshift.xyz](https://regimeshift.xyz) —
+current state, VRP signal, capital allocation, last 30 trades.
+Renderer refreshes every 5 minutes.
+
 ---
 
 ## Run it yourself in 10 minutes
