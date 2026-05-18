@@ -71,6 +71,16 @@ def snapshot(client, lp_mgr, hl_exec, tracker=None) -> StateSnapshot:
     except Exception as e:
         log.warning(f"  spot balance fetch failed: {e}")
 
+    # HyperEVM USDC — funds in transit between Base and HL.
+    # Used by reconcile() to detect IN_TRANSIT_TO_HL / IN_TRANSIT_TO_BASE
+    # states when a CCTP/HL bridge leg stalled.
+    hyperevm_usdc = 0
+    try:
+        from .phase2_forward import hyperevm_usdc_balance
+        hyperevm_usdc = hyperevm_usdc_balance(client.address)
+    except Exception as e:
+        log.warning(f"  HyperEVM USDC fetch failed: {e}")
+
     return StateSnapshot(
         base_usdc=base_usdc,
         base_eurc=base_eurc,
@@ -80,6 +90,7 @@ def snapshot(client, lp_mgr, hl_exec, tracker=None) -> StateSnapshot:
         hl_perp_size=hl_perp_size,
         hl_perp_entry=hl_perp_entry,
         hl_margin_usd=hl_margin,
+        hyperevm_usdc=hyperevm_usdc,
     )
 
 

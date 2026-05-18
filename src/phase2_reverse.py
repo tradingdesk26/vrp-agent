@@ -203,20 +203,22 @@ def run_reverse():
             return
 
     # ─── Step 3: Wait USDC on HyperEVM ─────────────────────────
-    log.info(f"\n--- Step 3: poll HyperEVM USDC arrival ---")
+    # HL send_asset → HyperEVM typically settles in 30-60s, but has been
+    # observed up to 90s in congestion. Use 180s to absorb the tail.
+    log.info(f"\n--- Step 3: poll HyperEVM USDC arrival (180s) ---")
     if config.RISK.dry_run:
-        log.info("  [DRY_RUN] would poll for ~60s")
+        log.info("  [DRY_RUN] would poll for ~180s")
     else:
         start = time.time()
         target = int((amount_to_send - 1) * 1e6)  # rough check
-        while time.time() - start < 60:
+        while time.time() - start < 180:
             cur = hyperevm_usdc_balance(base.address)
             if cur >= target:
                 log.info(f"  HyperEVM USDC: ${cur/1e6:.4f}")
                 break
             time.sleep(3)
         else:
-            log.error("  timeout waiting for HyperEVM USDC")
+            log.error("  timeout waiting for HyperEVM USDC (180s)")
             return
 
     # ─── Step 4: CCTP burn USDC HyperEVM → Base ────────────────
@@ -290,16 +292,18 @@ def run_reverse():
         return
 
     # ─── Step 6: Wait USDC mint on Base ────────────────────────
-    log.info(f"\n--- Step 6: poll Base USDC arrival ---")
+    # CCTP V2 attestation typically completes in ~10s, Base mint relayer
+    # within 30-60s, but tail observed up to 150s. Use 180s.
+    log.info(f"\n--- Step 6: poll Base USDC arrival (180s) ---")
     start = time.time()
-    while time.time() - start < 90:
+    while time.time() - start < 180:
         cur = base.balance(USDC_BASE)
         if cur >= pre_base_usdc + evm_amount * 0.95:
             log.info(f"  Base USDC arrived: ${cur/1e6:.4f}")
             break
         time.sleep(5)
     else:
-        log.warning("  Base USDC arrival not detected within 90s")
+        log.warning("  Base USDC arrival not detected within 180s")
 
     # ─── Step 7: Swap half USDC → ETH ──────────────────────────
     total_usdc = base.balance(USDC_BASE)

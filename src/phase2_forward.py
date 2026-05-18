@@ -226,16 +226,21 @@ def run_forward(entry_mode: str = "session", session_date: str | None = None,
     log.info("  attestation complete")
 
     # ─── Step 5: Wait for USDC to mint on HyperEVM ─────────────
-    log.info("\n--- Step 5: poll HyperEVM USDC arrival (60s) ---")
+    # CCTP V2 Iris attestation typically completes in ~10s, but Circle's
+    # auto-relayer to HyperEVM has been observed taking 60-120s. Use 180s
+    # to absorb relayer slowness; if still nothing, drop to UNKNOWN and
+    # let downstream recovery (state_machine IN_TRANSIT_TO_HL handling)
+    # take care of it.
+    log.info("\n--- Step 5: poll HyperEVM USDC arrival (180s) ---")
     start = time.time()
-    while time.time() - start < 60:
+    while time.time() - start < 180:
         cur_evm = hyperevm_usdc_balance(base.address)
         if cur_evm >= bridge_amount * 0.99:  # allow small fee
             log.info(f"  HyperEVM USDC arrived: ${cur_evm/1e6:.4f}")
             break
         time.sleep(3)
     else:
-        log.error("  USDC not detected on HyperEVM within 60s")
+        log.error("  USDC not detected on HyperEVM within 180s")
         return
 
     # ─── Step 6: CoreDepositWallet.deposit ─────────────────────
@@ -279,16 +284,16 @@ def run_forward(entry_mode: str = "session", session_date: str | None = None,
     send_evm(cdw.functions.deposit(evm_amount, DEST_PERPS), gas_limit=200_000)
 
     # 6c. Wait HL credit
-    log.info("\n--- Step 7: poll HL credit (60s) ---")
+    log.info("\n--- Step 7: poll HL credit (180s) ---")
     start = time.time()
-    while time.time() - start < 60:
+    while time.time() - start < 180:
         cur_hl = hl_spot_usdc(base.address) + hl.get_usdc_balance()
         if cur_hl > pre_hl_spot + (bridge_amount / 1e6) * 0.99:
             log.info(f"  HL credit detected: total margin = ${cur_hl:.4f}")
             break
         time.sleep(3)
     else:
-        log.warning("  HL credit not detected within 60s")
+        log.warning("  HL credit not detected within 180s")
 
     # ─── Step 8: Open long ETH-PERP ────────────────────────────
     log.info(f"\n--- Step 8: open long ETH-PERP ---")
@@ -383,16 +388,16 @@ def run_forward_from_cash(entry_mode: str = "session", session_date: str | None 
     log.info("  attestation complete")
 
     # ─── Step 5: Wait for USDC to mint on HyperEVM ─────────────
-    log.info("\n--- Step 5: poll HyperEVM USDC arrival (60s) ---")
+    log.info("\n--- Step 5: poll HyperEVM USDC arrival (180s) ---")
     start = time.time()
-    while time.time() - start < 60:
+    while time.time() - start < 180:
         cur_evm = hyperevm_usdc_balance(base.address)
         if cur_evm >= bridge_amount * 0.99:
             log.info(f"  HyperEVM USDC arrived: ${cur_evm/1e6:.4f}")
             break
         time.sleep(3)
     else:
-        log.error("  USDC not detected on HyperEVM within 60s")
+        log.error("  USDC not detected on HyperEVM within 180s")
         return
 
     # ─── Step 6: CoreDepositWallet.deposit ─────────────────────

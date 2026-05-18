@@ -35,6 +35,13 @@ class State(str, Enum):
     BRIDGING_TO_HL    = "BRIDGING_TO_HL"    # transitioning out of LP into HL
     BRIDGING_TO_BASE  = "BRIDGING_TO_BASE"  # transitioning back to LP
 
+    # Stuck-in-transit states: CCTP/HL bridge completed mint on HyperEVM
+    # but the next leg (HyperEVM → HL deposit or HyperEVM → Base burn)
+    # didn't happen — usually because the agent's poll window expired
+    # before the funds arrived. Recoverable.
+    IN_TRANSIT_TO_HL  = "IN_TRANSIT_TO_HL"   # USDC on HyperEVM, headed to HL
+    IN_TRANSIT_TO_BASE = "IN_TRANSIT_TO_BASE" # USDC on HyperEVM, headed to Base
+
     # Defensive mode: when VRP < 0 (crash regime), exit LP entirely
     # and stay as all-USDC on Base (no ETH price exposure)
     DEFENSIVE_CASH    = "DEFENSIVE_CASH"
@@ -54,6 +61,7 @@ class StateSnapshot:
     hl_perp_size: float                # signed: + long, − short, 0 = flat
     hl_perp_entry: float
     hl_margin_usd: float
+    hyperevm_usdc: int = 0             # raw 6-dec, in transit between Base ↔ HL
 
     def has_lp(self) -> bool:
         return self.lp_token_id is not None and self.lp_liquidity > 0
@@ -61,13 +69,19 @@ class StateSnapshot:
     def has_perp(self) -> bool:
         return abs(self.hl_perp_size) > 1e-9
 
+    def has_hyperevm_funds(self) -> bool:
+        """True if there's >$1 of USDC stuck on HyperEVM in-transit."""
+        return self.hyperevm_usdc > 1_000_000   # > $1.00
+
     def fmt(self) -> str:
+        evm_str = f" HyperEVM_USDC=${self.hyperevm_usdc/1e6:.2f}" if self.hyperevm_usdc > 0 else ""
         return (
             f"base_USDC={self.base_usdc/1e6:.4f} EURC={self.base_eurc/1e6:.4f} "
             f"ETH={self.base_eth_wei/1e18:.6f} "
             f"LP={'NFT#'+str(self.lp_token_id) if self.has_lp() else 'none'} "
             f"HL_perp={self.hl_perp_size:+.4f}@{self.hl_perp_entry:.2f} "
             f"HL_margin=${self.hl_margin_usd:.2f}"
+            f"{evm_str}"
         )
 
 
@@ -87,7 +101,18 @@ def reconcile(snap: StateSnapshot) -> State:
             # Both? Probably mid-transition or unexpected
             log.warning("inconsistent: has LP AND perp position")
             return State.LONG_ON_HL  # treat as in-trade
-        # No LP, no perp — figure out where funds are
+        # No LP, no perp — figure out where funds are.
+        # PRIORITY 1: HyperEVM stuck > $1. This means we burned on one side
+        # but the next leg didn't complete. We disambiguate direction by
+        # checking which side has the larger balance.
+        if snap.has_hyperevm_funds():
+            # If there's also meaningful Base USDC, we're mid-cycle —
+            # most likely returning from HL (HL → HyperEVM done, HyperEVM
+            # → Base pending). Otherwise we're outbound (Base → HyperEVM
+            # done, HyperEVM → HL deposit pending).
+            if snap.base_usdc > 1_000_000:
+                return State.IN_TRANSIT_TO_BASE
+            return State.IN_TRANSIT_TO_HL
         if snap.base_usdc > 500_000:   # > $0.50 USDC on Base
             return State.DEFENSIVE_CASH   # parked as stable
         if snap.hl_margin_usd > 0.5:

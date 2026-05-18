@@ -104,6 +104,30 @@ def run():
                 log.info(f"  state changed: {state.value} → {chain_state.value}")
                 state = chain_state
 
+            # ─── 2b. Auto-recovery for stuck-in-transit states ─
+            # If reconcile detected funds stranded on HyperEVM between Base
+            # and HL legs (CCTP poll window expired before relayer delivered),
+            # push them through the next leg automatically. Idempotent.
+            if state == sm.State.IN_TRANSIT_TO_HL:
+                log.warning(f"  ⚠ stuck IN_TRANSIT_TO_HL — auto-pushing to HL")
+                try:
+                    phase_session._resume_deposit_to_hl()
+                    # Re-snapshot to pick up new state on next tick
+                    chain_snap = transitions.snapshot(base, lp_mgr, hl_exec, tracker)
+                    chain_state = sm.reconcile(chain_snap)
+                    log.info(f"    post-recovery state: {chain_state.value}")
+                    state = chain_state
+                except Exception:
+                    log.exception("  ✗ auto-recover IN_TRANSIT_TO_HL failed")
+                    time.sleep(60); continue
+            elif state == sm.State.IN_TRANSIT_TO_BASE:
+                log.warning(f"  ⚠ stuck IN_TRANSIT_TO_BASE — manual recovery needed")
+                log.warning(f"    HyperEVM USDC: ${chain_snap.hyperevm_usdc/1e6:.4f}, "
+                            f"Base USDC: ${chain_snap.base_usdc/1e6:.4f}")
+                log.warning(f"    not auto-recovering (CCTP burn HyperEVM→Base needs "
+                            f"phase2_reverse from Step 4); will retry next tick")
+                time.sleep(config.STRAT.poll_interval_sec); continue
+
             # ─── 3. Position context (for stop-loss + entry_mode) ───
             pnl_pct: float | None = None
             entry_mode: str | None = None
