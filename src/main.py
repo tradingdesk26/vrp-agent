@@ -64,8 +64,8 @@ def run():
     log.info("vrp-agent SESSION-TIMING strategy starting")
     log.info("=" * 60)
     log.info(config.banner())
-    log.info(f"  Session entry hour:    {ss.SESSION_ENTRY_HOUR}:00 UTC")
-    log.info(f"  Session exit hour:     {ss.SESSION_EXIT_HOUR}:00 UTC")
+    log.info(f"  Session entry:         {ss.SESSION_ENTRY[0]:02d}:{ss.SESSION_ENTRY[1]:02d} UTC")
+    log.info(f"  Session exit:          {ss.SESSION_EXIT[0]:02d}:{ss.SESSION_EXIT[1]:02d} UTC")
     log.info(f"  Stop-loss:             {ss.STOP_LOSS_PCT*100:.1f}%")
     log.info(f"  VRP persistent entry:  +{ss.VRP_PERSISTENT_ENTRY}")
     log.info(f"  VRP persistent exit:   +{ss.VRP_PERSISTENT_EXIT}")
@@ -106,6 +106,7 @@ def run():
         try:
             now = datetime.utcnow()
             hour_utc = now.hour
+            minute_utc = now.minute
             today_str = now.strftime("%Y-%m-%d")
 
             # ─── 1. Pull fresh signal ───────────────────────
@@ -173,6 +174,7 @@ def run():
                 vrp_now=sig_snap.vrp,
                 vrp_prev=last_vrp,
                 hour_utc=hour_utc,
+                minute_utc=minute_utc,
                 today_session_done=today_session_done,
                 entry_mode=entry_mode,
                 pnl_pct=pnl_pct,
@@ -210,7 +212,7 @@ def run():
                 phase_session.enter_long(
                     state=state, mode="session",
                     session_date=today_str,
-                    entry_reason=f"session_20h_from_{state.value}",
+                    entry_reason=f"session_{ss.SESSION_ENTRY[0]:02d}{ss.SESSION_ENTRY[1]:02d}_from_{state.value}",
                 )
 
             elif d == ss.Decision.ENTER_PERSISTENT_LONG:

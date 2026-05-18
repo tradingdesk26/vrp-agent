@@ -24,11 +24,18 @@ from typing import Optional
 from . import state_machine as sm
 
 
-SESSION_ENTRY_HOUR = 20            # UTC
-SESSION_EXIT_HOUR  = 22            # UTC
+SESSION_ENTRY = (19, 55)           # (hour, minute) UTC — fire ENTER 5 min before the hour
+SESSION_EXIT  = (21, 55)           # (hour, minute) UTC — fire EXIT  5 min before the hour
 VRP_PERSISTENT_ENTRY = 30.0        # cross-up triggers persistent-long
 VRP_PERSISTENT_EXIT  = 6.0         # cross-down exits persistent-long
 STOP_LOSS_PCT        = 0.05        # -5% drawdown stop
+
+
+def _at_or_past(now_hm: tuple[int, int], target_hm: tuple[int, int]) -> bool:
+    """Compare (hour, minute) tuples within the same day."""
+    return now_hm[0] > target_hm[0] or (
+        now_hm[0] == target_hm[0] and now_hm[1] >= target_hm[1]
+    )
 
 
 class Decision(str, Enum):
@@ -57,6 +64,7 @@ def decide(
     today_session_done: bool,
     entry_mode: Optional[str],
     pnl_pct: Optional[float] = None,
+    minute_utc: int = 0,
 ) -> Action:
     """
     Returns an Action describing what the agent should do.
@@ -99,13 +107,17 @@ def decide(
             return Action(Decision.UPGRADE_TO_PERSISTENT,
                           f"vrp_cross_up_30 {vp:+.1f}→{vrp:+.1f}")
 
-        if hour_utc == SESSION_EXIT_HOUR:
+        # Session exit: fire ≥ SESSION_EXIT (h, m). We use ≥ (not ==) so a
+        # missed tick during this minute still triggers on the next poll.
+        # Cleared by the agent transitioning to non-LONG state.
+        if _at_or_past((hour_utc, minute_utc), SESSION_EXIT):
             target = "lp" if (vrp is not None and vrp > 0) else "cash"
             return Action(Decision.EXIT_LONG,
-                          f"session_exit_22h",
+                          f"session_exit_{SESSION_EXIT[0]:02d}{SESSION_EXIT[1]:02d}",
                           post_route=target)
 
-        return Action(Decision.HOLD, f"session_in_long hour={hour_utc}")
+        return Action(Decision.HOLD,
+                       f"session_in_long {hour_utc:02d}:{minute_utc:02d}")
 
     # ─── Not in LONG ──────────────────────────────────────────────
     # Persistent entry: VRP crosses UP through 30
@@ -114,9 +126,13 @@ def decide(
         return Action(Decision.ENTER_PERSISTENT_LONG,
                       f"vrp_cross_up_30 {vp:+.1f}→{vrp:+.1f}")
 
-    # Session entry: 20 UTC, not yet today
-    if hour_utc == SESSION_ENTRY_HOUR and not today_session_done:
-        return Action(Decision.ENTER_SESSION_LONG, f"session_20h")
+    # Session entry: fire ≥ SESSION_ENTRY (h, m). Bounded to <SESSION_EXIT
+    # so we don't open a session minutes before its scheduled close.
+    if (_at_or_past((hour_utc, minute_utc), SESSION_ENTRY)
+            and not _at_or_past((hour_utc, minute_utc), SESSION_EXIT)
+            and not today_session_done):
+        return Action(Decision.ENTER_SESSION_LONG,
+                       f"session_{SESSION_ENTRY[0]:02d}{SESSION_ENTRY[1]:02d}")
 
     # Cross-zero routing for idle LP/DEFENSIVE states
     if state == sm.State.PARKED_IN_LP \
