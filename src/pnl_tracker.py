@@ -133,6 +133,28 @@ class PnLTracker:
         ).fetchone()
         return row[0] if row and row[0] else None
 
+    def last_meaningful_state(self, exclude: set[str] | None = None) -> str | None:
+        """Most recent state in state_log excluding stuck/unknown states.
+
+        Used at agent startup to disambiguate IN_TRANSIT_* states — we
+        check what the agent was doing BEFORE it got stuck (e.g.,
+        LONG_ON_HL → reverse stalled; PARKED_IN_LP → forward stalled).
+        """
+        exclude = exclude or set()
+        if not exclude:
+            row = self._conn.execute(
+                "SELECT state FROM state_log ORDER BY ts DESC LIMIT 1"
+            ).fetchone()
+            return row[0] if row else None
+        # NOT IN clause with parameter binding
+        placeholders = ",".join(["?"] * len(exclude))
+        row = self._conn.execute(
+            f"SELECT state FROM state_log WHERE state NOT IN ({placeholders}) "
+            f"ORDER BY ts DESC LIMIT 1",
+            tuple(exclude),
+        ).fetchone()
+        return row[0] if row else None
+
     def close_trade(self, trade_id: int, ts: str, price: float,
                      reason: str, raw: dict):
         row = self._conn.execute(

@@ -85,10 +85,16 @@ class StateSnapshot:
         )
 
 
-def reconcile(snap: StateSnapshot) -> State:
+def reconcile(snap: StateSnapshot, prior: "State | None" = None) -> State:
     """
     Determine current state from on-chain reality.
     Trusts on-chain over any stored state file.
+
+    `prior` is the previous loop's state, used to disambiguate
+    IN_TRANSIT_TO_HL vs IN_TRANSIT_TO_BASE — both have identical
+    on-chain signatures (USDC sitting on HyperEVM with nothing
+    meaningful on Base/HL). Without prior we fall back to a
+    base-balance heuristic.
     """
     has_lp   = snap.has_lp()
     has_perp = snap.has_perp()
@@ -102,14 +108,22 @@ def reconcile(snap: StateSnapshot) -> State:
             log.warning("inconsistent: has LP AND perp position")
             return State.LONG_ON_HL  # treat as in-trade
         # No LP, no perp — figure out where funds are.
-        # PRIORITY 1: HyperEVM stuck > $1. This means we burned on one side
-        # but the next leg didn't complete. We disambiguate direction by
-        # checking which side has the larger balance.
+        # PRIORITY 1: HyperEVM stuck > $1. This means a bridge leg stalled.
+        # We disambiguate direction primarily by prior state:
+        #   PARKED_IN_LP / DEFENSIVE_CASH / BRIDGING_TO_HL → outbound (Base→HL),
+        #     so funds on HyperEVM are headed to HL.
+        #   LONG_ON_HL / CASH_ON_HL / BRIDGING_TO_BASE   → returning to Base,
+        #     so funds on HyperEVM should burn to Base.
+        # Without prior, fall back to base_usdc magnitude.
         if snap.has_hyperevm_funds():
-            # If there's also meaningful Base USDC, we're mid-cycle —
-            # most likely returning from HL (HL → HyperEVM done, HyperEVM
-            # → Base pending). Otherwise we're outbound (Base → HyperEVM
-            # done, HyperEVM → HL deposit pending).
+            if prior in {State.LONG_ON_HL, State.CASH_ON_HL,
+                          State.BRIDGING_TO_BASE, State.IN_TRANSIT_TO_BASE}:
+                return State.IN_TRANSIT_TO_BASE
+            if prior in {State.PARKED_IN_LP, State.DEFENSIVE_CASH,
+                          State.BRIDGING_TO_HL, State.IN_TRANSIT_TO_HL}:
+                return State.IN_TRANSIT_TO_HL
+            # Unknown prior: heuristic. If there's also Base USDC, more
+            # likely returning to Base mid-completion. Else outbound.
             if snap.base_usdc > 1_000_000:
                 return State.IN_TRANSIT_TO_BASE
             return State.IN_TRANSIT_TO_HL

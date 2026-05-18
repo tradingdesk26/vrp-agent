@@ -177,6 +177,104 @@ def _resume_deposit_to_hl() -> None:
     log.warning(f"    HL credit not detected within 60s (deposit submitted, may settle later)")
 
 
+def _resume_burn_to_base() -> bool:
+    """CCTP burn HyperEVM USDC → Base. Idempotent (skips if < $1).
+    Returns True if Base USDC arrived. After this, agent will be in
+    DEFENSIVE_CASH state; strategy decides whether to re-LP."""
+    import time
+    from eth_account import Account
+    from . import config
+    from .on_chain import cctp
+    from .on_chain.client import BaseClient, USDC_BASE
+    from .on_chain.cctp import (
+        TOKEN_MESSENGER_V2, TOKEN_MESSENGER_V2_ABI,
+        DOMAIN_BASE, DOMAIN_HYPEREVM, FINALITY_FAST,
+        MESSAGE_TRANSMITTER_V2, address_to_bytes32,
+    )
+    from .phase2_forward import (
+        USDC_HYPEREVM, HYPEREVM_CHAIN_ID, ERC20_ABI, hyperevm_w3,
+    )
+
+    w3 = hyperevm_w3()
+    account = Account.from_key(config.HL.private_key)
+    addr = account.address
+    base = BaseClient()
+    usdc_evm = w3.eth.contract(address=USDC_HYPEREVM, abi=ERC20_ABI)
+    tm_evm   = w3.eth.contract(address=TOKEN_MESSENGER_V2, abi=TOKEN_MESSENGER_V2_ABI)
+
+    bal = usdc_evm.functions.balanceOf(addr).call()
+    log.info(f"    HyperEVM USDC balance: ${bal/1e6:.4f}")
+    if bal < 1_000_000:
+        log.info(f"    nothing to burn (<$1)")
+        return False
+
+    pre_base_usdc = base.balance(USDC_BASE)
+    nonce = w3.eth.get_transaction_count(addr)
+
+    def send(fn, gas_limit=300_000):
+        nonlocal nonce
+        tx = fn.build_transaction({
+            "from": addr, "nonce": nonce, "chainId": HYPEREVM_CHAIN_ID,
+            "gas": gas_limit,
+            "maxFeePerGas": w3.eth.gas_price * 2,
+            "maxPriorityFeePerGas": int(0.001e9),
+        })
+        signed = account.sign_transaction(tx)
+        raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+        h = w3.eth.send_raw_transaction(raw)
+        nonce += 1
+        log.info(f"      submitted: {h.hex()}")
+        r = w3.eth.wait_for_transaction_receipt(h, timeout=120)
+        log.info(f"      confirmed: status={r.status}")
+        return r
+
+    # Approve TokenMessengerV2 on HyperEVM
+    cur_allow = usdc_evm.functions.allowance(addr, TOKEN_MESSENGER_V2).call()
+    if cur_allow < bal:
+        log.info("    approving USDC → TokenMessengerV2 on HyperEVM")
+        send(usdc_evm.functions.approve(TOKEN_MESSENGER_V2, 2**256 - 1),
+             gas_limit=100_000)
+        time.sleep(2)
+
+    # depositForBurn → Base
+    max_fee = bal * 50 // 10_000  # 0.5%
+    mint_recipient = address_to_bytes32(addr)
+    dest_caller = bytes(32)
+    log.info(f"    depositForBurn: amount={bal}, dest=Base(6)")
+    burn_receipt = send(
+        tm_evm.functions.depositForBurn(
+            bal, DOMAIN_BASE, mint_recipient, USDC_HYPEREVM,
+            dest_caller, max_fee, FINALITY_FAST,
+        ),
+        gas_limit=200_000,
+    )
+    burn_tx = burn_receipt.transactionHash.hex()
+    if not burn_tx.startswith("0x"):
+        burn_tx = "0x" + burn_tx
+
+    # Wait Iris attestation
+    log.info(f"    waiting Iris attestation (HyperEVM source)...")
+    attestation = cctp.wait_for_attestation(
+        burn_tx, src_domain=DOMAIN_HYPEREVM,
+        max_wait_sec=300, poll_interval_sec=5,
+    )
+    if not attestation:
+        log.error("    attestation timeout — burn submitted but mint pending")
+        return False
+
+    # Wait Base mint
+    log.info(f"    polling Base USDC arrival (180s)...")
+    start = time.time()
+    while time.time() - start < 180:
+        cur = base.balance(USDC_BASE)
+        if cur >= pre_base_usdc + bal * 0.95:
+            log.info(f"    Base USDC arrived: ${cur/1e6:.4f}")
+            return True
+        time.sleep(5)
+    log.warning(f"    Base USDC not detected within 180s — Circle relayer slow, will retry next tick")
+    return False
+
+
 def exit_long(target: str, exit_reason: str) -> bool:
     """Close long position and route capital.
 

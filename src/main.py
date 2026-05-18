@@ -76,9 +76,26 @@ def run():
     base     = BaseClient()
     lp_mgr   = LPManager(base)
 
-    # Initial reconciliation
+    # Initial reconciliation. If the agent restarted mid-bridge, the
+    # local `state` variable is gone — look up the last non-stuck state
+    # from the SQLite state_log so reconcile() can disambiguate
+    # IN_TRANSIT_TO_HL vs IN_TRANSIT_TO_BASE correctly.
+    prior_state_for_init: sm.State | None = None
+    try:
+        last_non_stuck = tracker.last_meaningful_state(exclude={
+            sm.State.UNKNOWN.value,
+            sm.State.IN_TRANSIT_TO_HL.value,
+            sm.State.IN_TRANSIT_TO_BASE.value,
+            sm.State.ERROR.value,
+        })
+        if last_non_stuck:
+            prior_state_for_init = sm.State(last_non_stuck)
+            log.info(f"  prior non-stuck state from log: {prior_state_for_init.value}")
+    except Exception as e:
+        log.warning(f"  could not read last state from log: {e}")
+
     snap = transitions.snapshot(base, lp_mgr, hl_exec, tracker)
-    state = sm.reconcile(snap)
+    state = sm.reconcile(snap, prior=prior_state_for_init)
     log.info(f"Initial reconcile: state={state.value}")
     log.info(f"  {snap.fmt()}")
 
@@ -99,7 +116,7 @@ def run():
 
             # ─── 2. Reconcile on-chain state ────────────────
             chain_snap = transitions.snapshot(base, lp_mgr, hl_exec, tracker)
-            chain_state = sm.reconcile(chain_snap)
+            chain_state = sm.reconcile(chain_snap, prior=state)
             if chain_state != state:
                 log.info(f"  state changed: {state.value} → {chain_state.value}")
                 state = chain_state
@@ -110,23 +127,28 @@ def run():
             # push them through the next leg automatically. Idempotent.
             if state == sm.State.IN_TRANSIT_TO_HL:
                 log.warning(f"  ⚠ stuck IN_TRANSIT_TO_HL — auto-pushing to HL")
+                log.warning(f"    HyperEVM USDC: ${chain_snap.hyperevm_usdc/1e6:.4f}")
                 try:
                     phase_session._resume_deposit_to_hl()
-                    # Re-snapshot to pick up new state on next tick
                     chain_snap = transitions.snapshot(base, lp_mgr, hl_exec, tracker)
-                    chain_state = sm.reconcile(chain_snap)
+                    chain_state = sm.reconcile(chain_snap, prior=state)
                     log.info(f"    post-recovery state: {chain_state.value}")
                     state = chain_state
                 except Exception:
                     log.exception("  ✗ auto-recover IN_TRANSIT_TO_HL failed")
                     time.sleep(60); continue
             elif state == sm.State.IN_TRANSIT_TO_BASE:
-                log.warning(f"  ⚠ stuck IN_TRANSIT_TO_BASE — manual recovery needed")
-                log.warning(f"    HyperEVM USDC: ${chain_snap.hyperevm_usdc/1e6:.4f}, "
-                            f"Base USDC: ${chain_snap.base_usdc/1e6:.4f}")
-                log.warning(f"    not auto-recovering (CCTP burn HyperEVM→Base needs "
-                            f"phase2_reverse from Step 4); will retry next tick")
-                time.sleep(config.STRAT.poll_interval_sec); continue
+                log.warning(f"  ⚠ stuck IN_TRANSIT_TO_BASE — auto-bursting to Base")
+                log.warning(f"    HyperEVM USDC: ${chain_snap.hyperevm_usdc/1e6:.4f}")
+                try:
+                    ok = phase_session._resume_burn_to_base()
+                    chain_snap = transitions.snapshot(base, lp_mgr, hl_exec, tracker)
+                    chain_state = sm.reconcile(chain_snap, prior=state)
+                    log.info(f"    post-recovery state: {chain_state.value}  (ok={ok})")
+                    state = chain_state
+                except Exception:
+                    log.exception("  ✗ auto-recover IN_TRANSIT_TO_BASE failed")
+                    time.sleep(60); continue
 
             # ─── 3. Position context (for stop-loss + entry_mode) ───
             pnl_pct: float | None = None
