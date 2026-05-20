@@ -294,9 +294,13 @@ def render_html(state_info, signal_snap, trades_df, chart_filename, out_path,
         totals = api_stats.get("counts", {}) or {}
         # Sum across the paid endpoints only — `_total.200` includes free
         # endpoints (/, /health, /stats) which would inflate the count.
-        total_paid   = sum(c["paid"]   for c in ep_summary.values())
-        total_probes = sum(c["probes"] for c in ep_summary.values())
-        total_reqs   = int(totals.get("_total.requests", 0))
+        total_paid    = sum(c["paid"]   for c in ep_summary.values())
+        total_probes  = sum(c["probes"] for c in ep_summary.values())
+        paid_ep_total = sum(c["total"]  for c in ep_summary.values())
+        # "Total requests" was previously `_total.requests` which includes
+        # /stats hits from the dashboard itself, inflating the number.
+        # Switch to paid-endpoint-only sum for clarity.
+        total_reqs    = paid_ep_total
         ep_rows = []
         for path, c in ep_summary.items():
             asset = "ETH" if "/eth/" in path else ("BTC" if "/btc/" in path else "?")
