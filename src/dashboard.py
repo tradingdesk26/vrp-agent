@@ -314,7 +314,7 @@ def render_html(state_info, signal_snap, trades_df, chart_filename, out_path,
         api_stats_html = f"""
   <div class="panel">
     <h3 style="margin-top:0">
-      ARMS Signals API — paid x402 endpoints
+      Paid x402 endpoints
       <small style="font-weight:normal;font-size:12px;color:#666">
         github.com/tradingdesk26/armsys-signals
       </small>
